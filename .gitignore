@@ -1,6 +1,6 @@
 .env
-.env.bak*
 __pycache__/
 cache/
-log/
 .venv/
+log/
+.env.bak*

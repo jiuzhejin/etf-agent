@@ -640,6 +640,9 @@ def calculate_indicators(df: pd.DataFrame, settled: bool = None) -> dict | None:
         "total_days": total_days,
         "missing_volume_days": int(missing_vol),
         "data_as_of": str(last_date),
+        # settled：最后一根日K是否已收盘（区别于 stale="数据到没到今天"）。
+        # 显式导出供批量 lite 缓存键和"盘中"角标使用，不再靠量比警示文案 substring。
+        "settled": bool(settled),
     }
     if str(last_date) < today_str:
         result["data_quality"]["stale"] = True

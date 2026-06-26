@@ -385,6 +385,215 @@ check("settled 缺省视为已收盘", "volume_ratio_note" not in ind_default)
 
 
 # ============================================================
+# 7. 自选池 watchlist
+# ============================================================
+
+print("\n=== 7. 自选池 watchlist ===\n")
+
+import tempfile
+import watchlist as wl
+
+# 存储指到临时目录，不污染真实 cache/
+_tmp = Path(tempfile.mkdtemp())
+wl._DIR = _tmp
+wl._FILE = _tmp / "watchlist.json"
+wl._BAK = _tmp / "watchlist.json.bak"
+
+d = wl._empty()
+check("空池默认两组", wl.groups(d) == ["持仓", "观察"])
+ok, _ = wl.add_item(d, "512980", "传媒ETF", "观察")
+check("加入标的成功", ok and wl.has(d, "512980"))
+ok2, _ = wl.add_item(d, "512980", "x", "持仓")
+check("重复代码去重", ok2 is False and len(wl.all_items(d)) == 1)
+wl.add_item(d, "510300", "沪深300", "持仓")
+check("按组取标的", [i["code"] for i in wl.items_in_group(d, "持仓")] == ["510300"])
+check("移动标的", wl.move_codes(d, ["512980"], "持仓") == 1
+      and len(wl.items_in_group(d, "持仓")) == 2)
+ok3, _ = wl.add_group(d, "宽基")
+check("新建组", ok3 and "宽基" in wl.groups(d))
+ok4, _ = wl.rename_group(d, "宽基", "大盘")
+check("重命名组", ok4 and "大盘" in wl.groups(d) and "宽基" not in wl.groups(d))
+ok5, _ = wl.delete_group(d, "观察")
+check("删空组", ok5)
+ok6, _ = wl.delete_group(d, "持仓")
+check("删非空组无目标→拒绝", ok6 is False)
+ok7, _ = wl.delete_group(d, "持仓", "大盘")
+check("删非空组迁移", ok7 and len(wl.items_in_group(d, "大盘")) == 2)
+check("删除标的", wl.remove_codes(d, ["510300"]) == 1)
+
+# save / load / bak
+wl.save(d)
+check("save 落盘", wl._FILE.exists())
+d2 = wl.load()
+check("load 回读一致",
+      [i["code"] for i in wl.all_items(d2)] == [i["code"] for i in wl.all_items(d)])
+wl.add_item(d2, "159915", "创业板", "大盘")
+wl.save(d2)
+check("二次写生成 .bak", wl._BAK.exists())
+wl._FILE.write_text("{ broken json", encoding="utf-8")
+d3 = wl.load()
+check("损坏主文件回退 .bak", any(i["code"] == "512980" for i in wl.all_items(d3)))
+
+# normalize 容错
+norm = wl._normalize({"version": 1, "groups": ["A"],
+                      "items": [{"code": "512980", "name": "x", "group": "B"}]})
+check("normalize 补未知组", "B" in norm["groups"])
+dup = wl._normalize({"groups": ["A"], "items": [{"code": "1"}, {"code": "1"}]})
+check("normalize 按 code 去重", len(dup["items"]) == 1)
+
+
+# ============================================================
+# 8. 批量快筛 batch
+# ============================================================
+
+print("\n=== 8. 批量快筛 batch ===\n")
+
+import batch as bt
+
+check("score_num 解析",
+      bt._score_num("7.5") == 7.5 and bt._score_num("?") == -1.0
+      and bt._score_num("5/10") == 5.0)
+check("mark_short 合法值原样", bt._mark_short("观望", {"建仓", "观望"}) == "观望")
+check("mark_short 越界标⚠", bt._mark_short("梭哈", {"持有"}) == "梭哈⚠")
+check("mark_short 缺失→?", bt._mark_short("?", {"持有"}) == "?")
+
+# lite 缓存 roundtrip
+bt._LITE_CACHE = _tmp / "lite_cache.json"
+bt._save_lite_cache({"k": {"score": "5"}})
+check("lite 缓存 roundtrip", bt._load_lite_cache().get("k", {}).get("score") == "5")
+
+# run_batch 编排：monkeypatch 掉数据/LLM，不联网不花 token
+_lite_calls = {"n": 0}
+
+
+def _fake_fetch(code):
+    return "DF_" + code
+
+
+def _fake_ind(df):
+    code = df.split("_")[1]
+    if code == "999999":
+        return None  # 模拟数据不足
+    settled = code != "111111"  # 111111 模拟盘中
+    return {"data_quality": {"data_as_of": "2026-06-24", "settled": settled}}
+
+
+def _fake_lite(ind, etf_name=""):
+    _lite_calls["n"] += 1
+    return {"score": "6", "if_empty": "观望", "if_holding": "持有", "reason": "x",
+            "_usage": {"prompt_tokens": 100, "completion_tokens": 10,
+                       "cache_hit_tokens": 0, "cache_miss_tokens": 100}}
+
+
+bt.fetch_etf_history = _fake_fetch
+bt.calculate_indicators = _fake_ind
+bt.analyze_etf_lite = _fake_lite
+bt._LITE_CACHE = _tmp / "lite_cache2.json"  # 干净缓存起步
+
+_items = [{"code": "512980", "name": "传媒"},
+          {"code": "111111", "name": "盘中"},
+          {"code": "999999", "name": "坏"}]
+res, st = bt.run_batch(_items)
+check("run_batch 行数=输入数", len(res) == 3)
+check("失败标的有 error", any(r["error"] for r in res if r["code"] == "999999"))
+check("盘中 settled=False",
+      [r for r in res if r["code"] == "111111"][0]["settled"] is False)
+check("成功标的有评分",
+      [r for r in res if r["code"] == "512980"][0]["score"] == "6")
+check("token 累计正确", st["completion_tokens"] == 20)  # 2 次成功调用 × 10
+
+res2, st2 = bt.run_batch(_items)
+check("settled 命中 lite 缓存", st2["cache_hits"] == 1)
+check("盘中不缓存仍调 LLM", any(r["code"] == "111111" and not r["from_cache"] for r in res2))
+check("缓存命中后 0 输出 token 那只", st2["llm_calls"] == 1)
+
+
+# ============================================================
+# 9. lite Prompt + settled 导出
+# ============================================================
+
+print("\n=== 9. lite Prompt + settled 导出 ===\n")
+
+import etf_analyzer as ea
+
+check("LITE 保留风控纪律", "操作纪律（风控优先" in ea.SYSTEM_PROMPT_LITE)
+check("LITE 保留字段说明", "## 你会收到的数据字段说明" in ea.SYSTEM_PROMPT_LITE)
+check("LITE 砍掉 11 项研报字段", "ma_analysis" not in ea.SYSTEM_PROMPT_LITE)
+check("LITE 含精简输出字段",
+      "if_empty" in ea.SYSTEM_PROMPT_LITE and "if_holding" in ea.SYSTEM_PROMPT_LITE)
+check("研报 Prompt 仍完整(对照)", "ma_analysis" in ea.SYSTEM_PROMPT)
+check("LITE 比研报短", len(ea.SYSTEM_PROMPT_LITE) < len(ea.SYSTEM_PROMPT))
+
+# settled 显式导出到 data_quality（用真实缓存 df 算一遍）
+if cached_files:
+    with open(cached_files[0]) as f:
+        _c = json.load(f)
+    _ind = calculate_indicators(pd.DataFrame(_c["data"]))
+    if _ind is not None:
+        check("data_quality 含 settled 字段", "settled" in _ind["data_quality"])
+        check("settled 是布尔", isinstance(_ind["data_quality"]["settled"], bool))
+
+
+# ============================================================
+# 10. 场外联接基金映射 feeder
+# ============================================================
+
+print("\n=== 10. 联接基金映射 feeder ===\n")
+
+import feeder as fd
+
+# 合成全市场基金名录（不联网），覆盖"干净一对"和"多对歧义"两种
+_fake_funds = [
+    {"基金代码": "110026", "基金简称": "易方达创业板ETF联接A"},
+    {"基金代码": "004744", "基金简称": "易方达创业板ETF联接C"},
+    {"基金代码": "020732", "基金简称": "易方达创业板200ETF联接A"},
+    {"基金代码": "020733", "基金简称": "易方达创业板200ETF联接C"},
+    {"基金代码": "014110", "基金简称": "嘉实中证稀有金属主题ETF发起联接A"},
+    {"基金代码": "014111", "基金简称": "嘉实中证稀有金属主题ETF发起联接C"},
+    {"基金代码": "003017", "基金简称": "广发中证军工ETF联接A"},  # 跨管理人同指数
+    {"基金代码": "005693", "基金简称": "广发中证军工ETF联接C"},
+    {"基金代码": "159915", "基金简称": "创业板ETF易方达"},  # ETF 本身，无"联接"→应忽略
+]
+fd._load_fund_list = lambda: _fake_funds
+
+# 多对歧义：创业板 匹配到 创业板/创业板200 两对，最短 base 排第一
+pairs = fd.suggest_pairs("创业板ETF易方达")
+check("联接匹配出 2 对", len(pairs) == 2)
+check("最短 base 排第一(正解 004744)", pairs[0]["c"]["code"] == "004744")
+auto, allp = fd.auto_or_candidates("创业板ETF易方达")
+check("多对→不自动填", auto is None and len(allp) == 2)
+
+# 干净一对：稀有金属 唯一 A/C → 自动
+auto2, allp2 = fd.auto_or_candidates("稀有金属ETF嘉实")
+check("唯一一对→自动填", auto2 is not None)
+check("自动填 C 代码正确", auto2 and auto2["c"]["code"] == "014111")
+
+# 不含"联接"的 ETF 本身不会被当候选
+check("ETF 本身不入候选", all("联接" in p["a"]["name"] for p in pairs)
+      and all(p["a"]["code"] != "159915" for p in pairs))
+
+# feeder_cell 显示（临时 map，不污染真实 cache）
+fd._MAP_FILE = _tmp / "etf_feeder_map.json"
+fd._map_cache = None
+fd.save_map({"562800": {"name": "x",
+                        "a": {"code": "014110", "name": "..A"},
+                        "c": {"code": "014111", "name": "..C"}}})
+check("feeder_cell 优先 C", fd.feeder_cell("562800") == "014111 C")
+check("未映射→—", fd.feeder_cell("999999") == "—")
+
+# 放宽管理人：国泰军工无自家联接，严格=0，放宽后找到广发(同指数)
+check("严格同管理人军工=0", len(fd.suggest_pairs("军工ETF国泰")) == 0)
+relaxed = fd.suggest_pairs("军工ETF国泰", relax_manager=True)
+check("放宽管理人找到同指数联接", len(relaxed) == 1 and relaxed[0]["c"]["code"] == "005693")
+
+# 手动设置：代码按名录校验
+ok_m, _ = fd.set_manual("512660", "军工ETF国泰", a_code="003017", c_code="005693")
+check("手动设置有效代码成功", ok_m and fd.feeder_cell("512660") == "005693 C")
+bad_m, _ = fd.set_manual("512660", "军工ETF国泰", c_code="000000")
+check("手动设置假代码被拒", bad_m is False)
+
+
+# ============================================================
 # 总结
 # ============================================================
 

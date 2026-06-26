@@ -1,0 +1,10 @@
+akshare
+anthropic
+gnureadline
+numpy
+openai
+pandas
+python-dotenv
+requests
+rich
+simple-term-menu

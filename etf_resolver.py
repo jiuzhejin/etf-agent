@@ -13,7 +13,10 @@ import json
 import os
 from datetime import date
 from pathlib import Path
-import gnureadline  # 修复 macOS 终端中文删除显示问题
+try:
+    import gnureadline  # 修复 macOS 终端中文删除显示问题
+except ImportError:
+    gnureadline = None
 
 def _get_llm_config():
     # DeepSeek 走 Anthropic 格式端点，复用 anthropic SDK，只换 base_url/key/model

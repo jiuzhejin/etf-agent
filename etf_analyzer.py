@@ -5,6 +5,7 @@ ETF 分析模块
 
 import json
 import os
+import hashlib
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -81,6 +82,16 @@ KDJ：
 5. **震荡/多头不适用保本减仓**：均线呈"缠绕震荡"或"多头排列"时，**不属于**已确认下跌趋势，不适用第2条，按指标综合常规判断（震荡可能是筑底，不要预设离场）。
 6. **空仓不接飞刀**：确认下跌趋势中空仓应"观望"，不因为超卖就建仓。
 7. **动作必须与风险提示自洽**：如果你的风险提示在警示下行风险，操作建议就不能装作没事给"持有"。风险段喊小心、动作段装没事，是自相矛盾。
+
+## 综合评分口径
+
+综合评分（score）是 1-10 的总分，**必须按以下四个维度各打 1-10 分后综合得出，不要只凭整体印象拍一个数**：
+- **趋势**：均线排列（多头/空头/缠绕）、MA20 方向、价格与各均线的关系
+- **动量**：MACD、RSI、KDJ —— 注意超买（RSI>70 / KDJ 高位）会压制动量分，不是越高越好
+- **量价**：量比、量价配合（放量上涨健康，缩量上涨或放量滞涨打折）
+- **风险**：最大回撤、波动率（atr_pct）、是否超买/突破布林上轨（回调风险）或破位/触及下轨
+
+总分约等于四个维度的均值，可按当前**主导矛盾**适当微调（例如趋势很强但已严重超买，风险维度会把总分往下拉，不应给到 8+）。这套口径在「完整研报」和「批量快筛」里完全一致。
 
 ## 输出要求
 
@@ -188,6 +199,43 @@ price: 2.15, ma_pattern: 多头排列, macd.signal: 金叉, rsi_14: 58, volume_r
 }
 ```
 """
+
+
+# ============================================================
+# 批量快筛（lite）Prompt
+# 复用研报 Prompt 的「字段说明 + 风控纪律」内核（从 SYSTEM_PROMPT 里切出来，
+# 单一来源、不漂移），只把 11 项结构化输出换成 4 个结论字段。
+# 风控纪律是「空仓/持仓建议」可信的根，删了 chat 模型会退化成"超卖就持有"
+# 的赌徒，所以快筛也必须保留它。
+# ============================================================
+_LITE_CORE_START = SYSTEM_PROMPT.index("## 你会收到的数据字段说明")
+_LITE_CORE_END = SYSTEM_PROMPT.index("## 输出要求")
+_SHARED_CORE = SYSTEM_PROMPT[_LITE_CORE_START:_LITE_CORE_END].rstrip()
+
+SYSTEM_PROMPT_LITE = (
+    "你是一位专业的 ETF 技术分析师。你只基于用户提供的技术指标数据进行分析，"
+    "不编造任何基本面信息。\n\n"
+    "这是「批量快筛」模式：用户一次扫多只 ETF，只看结论。"
+    "但你的分析逻辑必须和完整研报完全一致——在内部照样完整权衡趋势、"
+    "动量（含 RSI/KDJ 超买超卖）、量价、布林带、风险各个维度，"
+    "尤其是相互矛盾的信号（例如趋势强劲但已严重超买、突破布林上轨需防回调），"
+    "评分要把这些风险如实折算进去，不能只看多头排列就给高分。"
+    "只是最终不要逐项展开文字解读，只输出下面要求的几个汇总字段。\n\n"
+    f"{_SHARED_CORE}\n\n"
+    "## 输出要求\n\n"
+    "你无法得知用户当前是否持有该 ETF，因此操作建议必须分「空仓」和「已持有」"
+    "两个分支分别给出（同一技术面信号对两类用户含义往往相反）。\n\n"
+    "严格按以下 JSON 格式返回，不要输出任何 JSON 以外的内容。"
+    "字符串值内部若要引用词语，一律用中文引号「」，绝不用英文双引号 \" —— 它会破坏 JSON。\n\n"
+    "```json\n"
+    "{\n"
+    '  "score": "1-10 的综合评分，按上面四维度口径综合得出，可带一位小数",\n'
+    '  "if_empty": "空仓时的建议：建仓/观望 中选一个",\n'
+    '  "if_holding": "已持有时的建议：加仓/持有/减仓/清仓 中选一个",\n'
+    '  "reason": "一句话理由（25 字内，技术面依据；若有超买/突破上轨/破位等主要风险须一并点出，不能只报利好）"\n'
+    "}\n"
+    "```\n"
+)
 
 
 FOLLOWUP_SYSTEM_PROMPT = """你是一位专业的 ETF 技术分析师。用户已经看过一份完整的技术分析研报，现在有追问。
@@ -357,6 +405,97 @@ def analyze_etf(indicators: dict, etf_name: str = "") -> dict | None:
             print("LLM 返回的 JSON 解析失败，自动修复也未成功")
         print(f"原始返回:\n{text}")
         return None
+
+
+def lite_logic_version() -> str:
+    """
+    lite 分析逻辑的指纹（模型 + prompt 的短 hash）。
+
+    batch 的缓存键带上它，模型或 prompt 一改指纹就变，旧缓存自动失效——
+    避免"换了模型/改了 prompt，结果还命中上次的缓存"。用 hashlib（结果稳定），
+    不用内置 hash()（每进程随机化）。
+    """
+    _, _, model = _get_llm_config()
+    fingerprint = f"{model}\n{SYSTEM_PROMPT_LITE}"
+    return hashlib.md5(fingerprint.encode("utf-8")).hexdigest()[:8]
+
+
+def analyze_etf_lite(indicators: dict, etf_name: str = "") -> dict:
+    """
+    批量快筛：lite prompt + deepseek-chat + JSON Mode，返回精简结论。
+
+    始终返回一个 dict（不返回 None），便于 batch 层永远有一行可渲染：
+      成功 → {"score","if_empty","if_holding","reason","_usage"}
+      失败 → {"score":"?","if_empty":"?","if_holding":"?","reason":"","_error": "..."}
+
+    关键：用和深度研报**同一个模型**（LLM_MODEL，通常是 deepseek-reasoner）和同一套
+    分析纪律，只把输出从 11 项裁成 4 个字段——保证批量和单只的判断逻辑一致，
+    不会出现"快筛偏乐观、点进深度研报又变保守"的割裂。模型的思考过程是内部的、
+    不算返回内容，所以"批量只返回那几个字段"依然成立。
+    不打印、不显示动画（进度由 batch 层统一管理）；system prompt 在多只之间命中
+    DeepSeek prompt 缓存。
+    """
+    from openai import OpenAI
+    api_key, _, model = _get_llm_config()
+
+    def _fail(msg: str) -> dict:
+        return {"score": "?", "if_empty": "?", "if_holding": "?", "reason": "", "_error": msg}
+
+    try:
+        client = OpenAI(api_key=api_key, base_url=_get_openai_base_url())
+        user_content = f"## {etf_name}（{indicators.get('date', '')}）技术指标数据\n\n"
+        user_content += "```json\n"
+        user_content += json.dumps(indicators, ensure_ascii=False, indent=2)
+        user_content += "\n```\n"
+        user_content += "\n请快筛：只输出评分和操作建议的 JSON，不要展开分析。"
+
+        resp = client.chat.completions.create(
+            model=model,
+            max_tokens=8000,  # reasoner 思考 token 也占额度，给足避免 JSON 被截断
+            response_format={"type": "json_object"},  # JSON Mode 硬保证合法 JSON
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT_LITE},
+                {"role": "user", "content": user_content},
+            ],
+        )
+    except Exception as e:
+        return _fail(str(e))
+
+    text = _strip_code_fence(resp.choices[0].message.content or "")
+    if not text:
+        return _fail("LLM 返回空内容")
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        repaired = _repair_json_with_llm(text)
+        if not repaired:
+            return _fail("JSON 解析失败")
+        try:
+            data = json.loads(_strip_code_fence(repaired))
+        except json.JSONDecodeError:
+            return _fail("JSON 解析失败（修复后仍失败）")
+
+    result = {
+        "score": data.get("score", "?"),
+        "if_empty": data.get("if_empty", "?"),
+        "if_holding": data.get("if_holding", "?"),
+        "reason": data.get("reason", ""),
+    }
+
+    # 抽取 token 用量供 batch 统计（DeepSeek 在 usage 里附 cache 命中/未命中字段，
+    # 标准 OpenAI 模型没有，用 model_dump 容错读取）。
+    try:
+        usage = resp.usage.model_dump() if resp.usage else {}
+    except Exception:
+        usage = {}
+    result["_usage"] = {
+        "prompt_tokens": usage.get("prompt_tokens", 0) or 0,
+        "completion_tokens": usage.get("completion_tokens", 0) or 0,
+        "cache_hit_tokens": usage.get("prompt_cache_hit_tokens", 0) or 0,
+        "cache_miss_tokens": usage.get("prompt_cache_miss_tokens", 0) or 0,
+    }
+    return result
 
 
 # 操作建议的合法枚举（LLM 越界时标出来，而不是静默改写）
