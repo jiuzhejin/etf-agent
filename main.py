@@ -9,6 +9,7 @@ ETF 投资研报 Agent
 """
 
 from pathlib import Path
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -20,13 +21,12 @@ try:
     import gnureadline  # 修复 macOS 终端中文删除显示问题
 except ImportError:
     gnureadline = None
-from etf_resolver import resolve_etf_code, validate_code
-from etf_data import fetch_etf_history, calculate_indicators
-from etf_analyzer import analyze_etf, ask_followup, format_report
-import watchlist
 import batch
 import ui
-
+import watchlist
+from etf_analyzer import analyze_etf, ask_followup, format_report
+from etf_data import calculate_indicators, fetch_etf_history
+from etf_resolver import resolve_etf_code, validate_code
 
 # 单只模式的会话状态
 current_code = None
@@ -43,6 +43,7 @@ def _name_lookup(code: str) -> str:
 # ============================================================
 # 单只深度研报模式（保留原有能力）
 # ============================================================
+
 
 def run_analysis(code: str, name: str) -> dict | None:
     """完整分析流程：拉数据 → 算指标 → LLM 分析"""
@@ -159,6 +160,7 @@ def single_mode():
 # 自选池辅助：选组
 # ============================================================
 
+
 def _pick_group(data: dict, title: str, allow_new: bool = True) -> str | None:
     """方向键选一个组；allow_new 时末尾给"新建组"。返回组名或 None。"""
     grps = watchlist.groups(data)
@@ -177,6 +179,7 @@ def _pick_group(data: dict, title: str, allow_new: bool = True) -> str | None:
 # ============================================================
 # 批量快筛模式
 # ============================================================
+
 
 def _temp_input_items() -> list[dict]:
     """临时输入一串代码/名称，解析成 [{code,name}]。"""
@@ -203,8 +206,9 @@ def batch_mode():
     # 空池引导
     if not items:
         print("\n自选池为空。")
-        opt = ui.select(["从历史缓存导入（你之前看过的）", "临时输入一串代码", "返回菜单"],
-                        "怎么开始?")
+        opt = ui.select(
+            ["从历史缓存导入（你之前看过的）", "临时输入一串代码", "返回菜单"], "怎么开始?"
+        )
         if opt == 0:
             n = watchlist.import_from_cache(data, name_lookup=_name_lookup)
             watchlist.save(data)
@@ -230,7 +234,7 @@ def batch_mode():
         return
     if gi == 0:
         scope = items
-        title = f"批量快筛 · 全部"
+        title = "批量快筛 · 全部"
     elif gi == len(group_opts) - 1:
         chosen = _temp_input_items()
         if chosen:
@@ -275,6 +279,7 @@ def _run_and_offer_save(chosen: list[dict], data: dict, title: str):
 # ============================================================
 # 管理自选池模式
 # ============================================================
+
 
 def _print_pool(data: dict):
     items = watchlist.all_items(data)
@@ -336,6 +341,7 @@ def _manage_groups(data: dict):
 def _manage_feeders(data: dict):
     """为自选池里的 ETF 维护场外联接基金(A/C)映射：干净的自动填，有歧义的人工选。"""
     import feeder
+
     items = watchlist.all_items(data)
     if not items:
         print("  自选池为空，先添加标的")
@@ -386,6 +392,7 @@ def _manage_feeders(data: dict):
 def _set_feeder_manual(data: dict):
     """手动给某只 ETF 指定联接：先列同指数候选(放宽管理人)给你选，选不到再手输代码。"""
     import feeder
+
     items = watchlist.all_items(data)
     if not items:
         print("  自选池为空，先添加标的")
@@ -424,9 +431,18 @@ def manage_mode():
     """管理自选池：查看 / 增删 / 移动 / 组管理 / 刷新名 / 联接映射 / 导入。"""
     while True:
         data = watchlist.load()
-        actions = ["查看", "添加标的", "删除标的", "移动标的到别组",
-                   "组管理", "刷新名称", "维护联接基金映射", "手动指定联接",
-                   "从历史缓存导入", "返回菜单"]
+        actions = [
+            "查看",
+            "添加标的",
+            "删除标的",
+            "移动标的到别组",
+            "组管理",
+            "刷新名称",
+            "维护联接基金映射",
+            "手动指定联接",
+            "从历史缓存导入",
+            "返回菜单",
+        ]
         idx = ui.select(actions, f"管理自选池（共 {len(watchlist.all_items(data))} 只）")
         if idx is None:
             return
@@ -509,6 +525,7 @@ def manage_mode():
 # 主菜单
 # ============================================================
 
+
 def main():
     print("=" * 50)
     print("  ETF 投资研报 Agent")
@@ -518,10 +535,12 @@ def main():
         # 菜单 emoji 必须用增补平面（U+1F300+，库与终端都按 2 宽渲染）；
         # 老符号区的 ⚡⭐（U+26xx/2Bxx）库 wcswidth 返回 -1 会让菜单错位，禁用。
         idx = ui.select(
-            ["📊 单只深度研报 — 完整分析、可追问",
-             "🔍 批量快筛 — 多只评分+建议，省 token",
-             "🌟 管理自选池 — 分组维护标的池",
-             "🚪 退出"],
+            [
+                "📊 单只深度研报 — 完整分析、可追问",
+                "🔍 批量快筛 — 多只评分+建议，省 token",
+                "🌟 管理自选池 — 分组维护标的池",
+                "🚪 退出",
+            ],
             "选择模式（↑↓ 选择，Enter 确认）",
         )
         if idx is None or idx == 3:

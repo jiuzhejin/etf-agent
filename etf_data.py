@@ -6,6 +6,7 @@ ETF 数据获取模块
 import json
 from datetime import date, datetime
 from pathlib import Path
+
 import pandas as pd
 
 _CACHE_DIR = Path(__file__).parent / "cache"
@@ -61,6 +62,7 @@ def _save_cache(code: str, df: pd.DataFrame):
 def _fetch_realtime_sina(code: str) -> dict | None:
     """从新浪获取实时行情"""
     import requests
+
     sina_code = f"{_exchange_prefix(code)}{code}"
     try:
         r = requests.get(
@@ -89,6 +91,7 @@ def _fetch_realtime_sina(code: str) -> dict | None:
 def _fetch_realtime_tencent(code: str) -> dict | None:
     """从腾讯获取实时行情"""
     import requests
+
     qq_code = f"{_exchange_prefix(code)}{code}"
     try:
         r = requests.get(f"https://qt.gtimg.cn/q={qq_code}", timeout=5)
@@ -190,26 +193,33 @@ def _fetch_from_sina(code: str) -> pd.DataFrame | None:
     """从新浪拉取数据（主源），并统一列名格式"""
     try:
         import akshare as ak
+
         sina_code = _sina_symbol(code)
         df = ak.fund_etf_hist_sina(symbol=sina_code)
         if df.empty:
             return None
 
         # 统一列名为东方财富格式
-        df = df.rename(columns={
-            "date": "日期",
-            "open": "开盘",
-            "close": "收盘",
-            "high": "最高",
-            "low": "最低",
-            "volume": "成交量",
-            "amount": "成交额",
-        })
+        df = df.rename(
+            columns={
+                "date": "日期",
+                "open": "开盘",
+                "close": "收盘",
+                "high": "最高",
+                "low": "最低",
+                "volume": "成交量",
+                "amount": "成交额",
+            }
+        )
 
         df["日期"] = df["日期"].astype(str)
         df["涨跌额"] = df["收盘"].astype(float).diff()
         df["涨跌幅"] = df["收盘"].astype(float).pct_change() * 100
-        df["振幅"] = (df["最高"].astype(float) - df["最低"].astype(float)) / df["收盘"].astype(float).shift(1) * 100
+        df["振幅"] = (
+            (df["最高"].astype(float) - df["最低"].astype(float))
+            / df["收盘"].astype(float).shift(1)
+            * 100
+        )
         df["换手率"] = 0.0
         df = df.iloc[1:].reset_index(drop=True)
 
@@ -222,6 +232,7 @@ def _fetch_from_eastmoney(code: str, start_date: str = None) -> pd.DataFrame | N
     """从东方财富拉取数据"""
     try:
         import akshare as ak
+
         kwargs = {"symbol": code, "period": "daily", "adjust": "qfq"}
         if start_date:
             kwargs["start_date"] = start_date
@@ -239,6 +250,7 @@ def _fetch_from_tencent(code: str) -> pd.DataFrame | None:
     """从腾讯拉取数据（备用源），并统一列名格式"""
     try:
         import akshare as ak
+
         # 腾讯源需要 sh/sz 前缀
         symbol = f"{_exchange_prefix(code)}{code}"
         df = ak.stock_zh_a_hist_tx(symbol=symbol, start_date="20240101", end_date="20500101")
@@ -246,14 +258,16 @@ def _fetch_from_tencent(code: str) -> pd.DataFrame | None:
             return None
 
         # 统一列名为东方财富格式
-        df = df.rename(columns={
-            "date": "日期",
-            "open": "开盘",
-            "close": "收盘",
-            "high": "最高",
-            "low": "最低",
-            "amount": "成交量",
-        })
+        df = df.rename(
+            columns={
+                "date": "日期",
+                "open": "开盘",
+                "close": "收盘",
+                "high": "最高",
+                "low": "最低",
+                "amount": "成交量",
+            }
+        )
 
         # 日期统一为字符串格式
         df["日期"] = df["日期"].astype(str)
@@ -293,6 +307,7 @@ def fetch_etf_history(code: str, days: int = 250) -> pd.DataFrame | None:
     # 判断缓存是否足够新（昨天或今天的数据）
     if cached_df is not None and last_date is not None:
         from datetime import timedelta
+
         yesterday_str = (date.today() - timedelta(days=1)).isoformat()
 
         today_str = date.today().isoformat()
@@ -308,7 +323,10 @@ def fetch_etf_history(code: str, days: int = 250) -> pd.DataFrame | None:
             print(f"读取缓存到 {last_date}，拉取增量数据...")
             new_rows = None
             sources = [
-                ("东方财富", lambda: _fetch_from_eastmoney(code, start_date=last_date.replace("-", ""))),
+                (
+                    "东方财富",
+                    lambda: _fetch_from_eastmoney(code, start_date=last_date.replace("-", "")),
+                ),
                 ("新浪", lambda: _fetch_from_sina(code)),
                 ("腾讯", lambda: _fetch_from_tencent(code)),
             ]
@@ -373,7 +391,6 @@ def fetch_etf_history(code: str, days: int = 250) -> pd.DataFrame | None:
 # 指标计算
 # ============================================================
 
-import numpy as np
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
@@ -422,9 +439,9 @@ def calculate_indicators(df: pd.DataFrame, settled: bool = None) -> dict | None:
     # 均线形态判断
     available_mas = [ma_values.get(f"ma{p}") for p in [5, 10, 20, 60] if f"ma{p}" in ma_values]
     if len(available_mas) >= 4:
-        if all(available_mas[i] > available_mas[i+1] for i in range(len(available_mas)-1)):
+        if all(available_mas[i] > available_mas[i + 1] for i in range(len(available_mas) - 1)):
             result["ma_pattern"] = "多头排列"
-        elif all(available_mas[i] < available_mas[i+1] for i in range(len(available_mas)-1)):
+        elif all(available_mas[i] < available_mas[i + 1] for i in range(len(available_mas) - 1)):
             result["ma_pattern"] = "空头排列"
         else:
             result["ma_pattern"] = "缠绕震荡"
@@ -607,11 +624,14 @@ def calculate_indicators(df: pd.DataFrame, settled: bool = None) -> dict | None:
 
     # ---- P1: ATR ----
     if len(close) >= 15:
-        tr = pd.concat([
-            high - low,
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ], axis=1).max(axis=1)
+        tr = pd.concat(
+            [
+                high - low,
+                (high - close.shift(1)).abs(),
+                (low - close.shift(1)).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
         atr = tr.rolling(14).mean().iloc[-1]
         result["atr_14"] = round(atr, 4)
         result["atr_pct"] = round(atr / latest * 100, 2)  # ATR 占价格的百分比
@@ -646,7 +666,9 @@ def calculate_indicators(df: pd.DataFrame, settled: bool = None) -> dict | None:
     }
     if str(last_date) < today_str:
         result["data_quality"]["stale"] = True
-        result["data_quality"]["warning"] = f"数据截至 {last_date}，非最新数据，分析结果可能与实时行情有偏差"
+        result["data_quality"]["warning"] = (
+            f"数据截至 {last_date}，非最新数据，分析结果可能与实时行情有偏差"
+        )
     else:
         result["data_quality"]["stale"] = False
     if missing_vol > 0:

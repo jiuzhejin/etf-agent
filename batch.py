@@ -18,9 +18,13 @@ import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from etf_data import fetch_etf_history, calculate_indicators
-from etf_analyzer import (analyze_etf_lite, lite_logic_version,
-                          VALID_ACTIONS_EMPTY, VALID_ACTIONS_HOLDING)
+from etf_analyzer import (
+    VALID_ACTIONS_EMPTY,
+    VALID_ACTIONS_HOLDING,
+    analyze_etf_lite,
+    lite_logic_version,
+)
+from etf_data import calculate_indicators, fetch_etf_history
 
 _CACHE_DIR = Path(__file__).parent / "cache"
 _LITE_CACHE = _CACHE_DIR / "lite_cache.json"
@@ -35,6 +39,7 @@ _PRICE_OUT = float(os.environ.get("LITE_PRICE_OUT", "16.0"))
 # ============================================================
 # lite 结论缓存
 # ============================================================
+
 
 def _load_lite_cache() -> dict:
     if _LITE_CACHE.exists():
@@ -58,11 +63,18 @@ def _save_lite_cache(cache: dict) -> None:
 # 跑批
 # ============================================================
 
+
 def _new_stats() -> dict:
     return {
-        "n": 0, "llm_calls": 0, "cache_hits": 0, "fails": 0,
-        "prompt_tokens": 0, "completion_tokens": 0,
-        "cache_hit_tokens": 0, "cache_miss_tokens": 0, "cost": 0.0,
+        "n": 0,
+        "llm_calls": 0,
+        "cache_hits": 0,
+        "fails": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
+        "cost": 0.0,
     }
 
 
@@ -88,9 +100,16 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
         print(f"\r  分析中 [{idx}/{n}] {code} {name}".ljust(48), end="", flush=True)
 
         row = {
-            "code": code, "name": name, "score": "?",
-            "if_empty": "?", "if_holding": "?", "reason": "",
-            "settled": True, "date": "", "from_cache": False, "error": None,
+            "code": code,
+            "name": name,
+            "score": "?",
+            "if_empty": "?",
+            "if_holding": "?",
+            "reason": "",
+            "settled": True,
+            "date": "",
+            "from_cache": False,
+            "error": None,
         }
 
         # 拉数据 + 算指标（抑制 fetch 的来源/缓存打印，保持批量输出干净）
@@ -137,14 +156,17 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
             row["error"] = out["_error"]
         usage = out.get("_usage")
         if usage:
-            for k in ("prompt_tokens", "completion_tokens",
-                      "cache_hit_tokens", "cache_miss_tokens"):
+            for k in (
+                "prompt_tokens",
+                "completion_tokens",
+                "cache_hit_tokens",
+                "cache_miss_tokens",
+            ):
                 stats[k] += usage.get(k, 0)
 
         # 写 lite 缓存（仅 settled 且成功）
         if settled and not out.get("_error"):
-            lite_cache[key] = {k: out.get(k) for k in
-                               ("score", "if_empty", "if_holding", "reason")}
+            lite_cache[key] = {k: out.get(k) for k in ("score", "if_empty", "if_holding", "reason")}
             dirty = True
 
         results.append(row)
@@ -159,8 +181,7 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
     if hit + miss == 0:
         miss = stats["prompt_tokens"]
     stats["cost"] = (
-        hit * _PRICE_IN_HIT + miss * _PRICE_IN_MISS
-        + stats["completion_tokens"] * _PRICE_OUT
+        hit * _PRICE_IN_HIT + miss * _PRICE_IN_MISS + stats["completion_tokens"] * _PRICE_OUT
     ) / 1_000_000
     return results, stats
 
@@ -168,6 +189,7 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
 # ============================================================
 # 渲染
 # ============================================================
+
 
 def _score_num(s) -> float:
     """把评分转成可排序的数；'?'/非法 → -1（排末尾）。"""
@@ -186,17 +208,16 @@ def _mark_short(value, valid: set) -> str:
 
 def render(results: list[dict], stats: dict, title: str = "批量快筛") -> None:
     """打印 rich 表格 + token/花费统计。"""
+    from rich import box
     from rich.console import Console
     from rich.table import Table
-    from rich import box
 
     console = Console()
     rows = sorted(results, key=lambda r: _score_num(r["score"]), reverse=True)
 
     has_intraday = any(not r["settled"] for r in results)
 
-    table = Table(title=f"{title}  共 {stats['n']} 只", box=box.SIMPLE_HEAVY,
-                  header_style="bold")
+    table = Table(title=f"{title}  共 {stats['n']} 只", box=box.SIMPLE_HEAVY, header_style="bold")
     table.add_column("代码", style="cyan", no_wrap=True)
     table.add_column("名称", no_wrap=True)
     table.add_column("评分", justify="right", no_wrap=True)
@@ -206,12 +227,20 @@ def render(results: list[dict], stats: dict, title: str = "批量快筛") -> Non
     table.add_column("联接基金(C)", style="cyan", no_wrap=True)  # 用户实际买的场外联接
 
     import feeder
+
     for r in rows:
         feeder_cell = feeder.feeder_cell(r["code"])
         if r["error"]:
             # 失败行：标 ?，理由处红字显示错误
-            table.add_row(r["code"], r["name"] or "?", "[dim]?[/dim]",
-                          "?", "?", f"[red]✗ {r['error']}[/red]", feeder_cell)
+            table.add_row(
+                r["code"],
+                r["name"] or "?",
+                "[dim]?[/dim]",
+                "?",
+                "?",
+                f"[red]✗ {r['error']}[/red]",
+                feeder_cell,
+            )
             continue
 
         sv = _score_num(r["score"])
@@ -236,8 +265,9 @@ def render(results: list[dict], stats: dict, title: str = "批量快筛") -> Non
         reason = r["reason"]
         if r["from_cache"]:
             reason += "  [dim](缓存)[/dim]"
-        table.add_row(r["code"], r["name"] or "?", score_cell,
-                      empty_cell, hold_cell, reason, feeder_cell)
+        table.add_row(
+            r["code"], r["name"] or "?", score_cell, empty_cell, hold_cell, reason, feeder_cell
+        )
 
     console.print()
     console.print(table)
@@ -257,11 +287,12 @@ def render(results: list[dict], stats: dict, title: str = "批量快筛") -> Non
     if stats["fails"]:
         parts.append(f"失败 {stats['fails']} 只")
     summary = "  本次快筛：" + " | ".join(parts)
-    detail = (f"  输入 {in_tokens/1000:.1f}k token"
-              f"（其中缓存命中 {hit_tokens/1000:.1f}k）"
-              f" | 输出 {out_tokens/1000:.1f}k token"
-              f" | 约 ¥{stats['cost']:.4f}（估算，价随 DeepSeek 调整）")
+    detail = (
+        f"  输入 {in_tokens / 1000:.1f}k token"
+        f"（其中缓存命中 {hit_tokens / 1000:.1f}k）"
+        f" | 输出 {out_tokens / 1000:.1f}k token"
+        f" | 约 ¥{stats['cost']:.4f}（估算，价随 DeepSeek 调整）"
+    )
     console.print(f"[dim]{summary}[/dim]")
     console.print(f"[dim]{detail}[/dim]")
-    console.print("[dim]  快筛仅出结论；要细看请回主菜单对单只跑深度研报。"
-                  "不构成投资建议。[/dim]")
+    console.print("[dim]  快筛仅出结论；要细看请回主菜单对单只跑深度研报。不构成投资建议。[/dim]")

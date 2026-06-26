@@ -18,7 +18,6 @@
 
 import json
 import os
-import re
 from datetime import date
 from pathlib import Path
 
@@ -80,6 +79,7 @@ def feeder_cell(etf_code: str, prefer: str = "c") -> str:
 # 候选匹配（需要 akshare，仅维护映射时调用）
 # ============================================================
 
+
 def _load_fund_list():
     """全市场基金名录，按天缓存（27000+ 条，避免反复下载）。"""
     today = date.today().isoformat()
@@ -92,6 +92,7 @@ def _load_fund_list():
         except (json.JSONDecodeError, OSError):
             pass
     import akshare as ak
+
     df = ak.fund_name_em()
     data = df[["基金代码", "基金简称"]].to_dict("records")
     _DIR.mkdir(exist_ok=True)
@@ -165,8 +166,9 @@ def lookup_fund(code: str) -> str | None:
     return None
 
 
-def set_manual(etf_code: str, etf_name: str,
-               a_code: str = "", c_code: str = "") -> tuple[bool, str]:
+def set_manual(
+    etf_code: str, etf_name: str, a_code: str = "", c_code: str = ""
+) -> tuple[bool, str]:
     """手动给某只 ETF 设置联接(A/C)。代码会按基金名录校验，防止填错。"""
     a_code = (a_code or "").strip()
     c_code = (c_code or "").strip()
@@ -184,4 +186,5 @@ def set_manual(etf_code: str, etf_name: str,
     m[str(etf_code)] = entry
     save_map(m)
     return True, f"已设置 {etf_code} → " + " / ".join(
-        f"{c.upper()} {entry[c]['code']}" for c in ("c", "a") if c in entry)
+        f"{c.upper()} {entry[c]['code']}" for c in ("c", "a") if c in entry
+    )

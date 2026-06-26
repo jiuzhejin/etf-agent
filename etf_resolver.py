@@ -8,15 +8,17 @@ ETF 代码解析模块
 3. 匹配失败 → LLM 提取关键词 → 再模糊匹配
 """
 
-import re
 import json
 import os
+import re
 from datetime import date
 from pathlib import Path
+
 try:
     import gnureadline  # 修复 macOS 终端中文删除显示问题
 except ImportError:
     gnureadline = None
+
 
 def _get_llm_config():
     # DeepSeek 走 Anthropic 格式端点，复用 anthropic SDK，只换 base_url/key/model
@@ -55,6 +57,7 @@ def load_etf_list():
 
     # 缓存不存在或过期，从 AKShare 拉取
     import akshare as ak
+
     print("正在从 AKShare 加载 ETF 列表...")
     df = ak.fund_etf_spot_em()
     _etf_list_cache = df[["代码", "名称"]].to_dict("records")
@@ -70,6 +73,7 @@ def load_etf_list():
 # ============================================================
 # 第1步：纯数字 → 验证代码是否存在
 # ============================================================
+
 
 def is_pure_code(user_input: str) -> bool:
     """判断是否为纯数字 ETF 代码"""
@@ -89,6 +93,7 @@ def validate_code(code: str) -> dict | None:
 # 第2步：模糊匹配
 # ============================================================
 
+
 def fuzzy_match(keyword: str) -> list[dict]:
     """用关键词在 ETF 名称中模糊匹配，返回匹配列表"""
     etf_list = load_etf_list()
@@ -104,10 +109,12 @@ def fuzzy_match(keyword: str) -> list[dict]:
 # 第3步：LLM 提取关键词
 # ============================================================
 
+
 def extract_keyword_by_llm(user_input: str) -> list[str]:
     """调用 LLM 从自然语言中提取 ETF 相关关键词"""
     try:
         import anthropic
+
         api_key, base_url, model = _get_llm_config()
         client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
         response = client.messages.create(
@@ -126,6 +133,7 @@ def extract_keyword_by_llm(user_input: str) -> list[str]:
 # ============================================================
 # 用户选择
 # ============================================================
+
 
 def _has_cache(code: str) -> bool:
     """检查该 ETF 是否有本地历史缓存（即用户之前看过）"""
@@ -149,13 +157,13 @@ def let_user_choose(matches: list[dict]) -> dict | None:
         for i, item in enumerate(cached, 1):
             print(f"  {i}. {item['code']} {item['name']}")
         if rest:
-            print(f"  ── 其他 ──")
+            print("  ── 其他 ──")
 
     start = len(cached) + 1
     for i, item in enumerate(rest, start):
         print(f"  {i}. {item['code']} {item['name']}")
 
-    print(f"  0. 都不是，重新输入")
+    print("  0. 都不是，重新输入")
 
     while True:
         choice = input("\n请选择序号或代码: ").strip()
@@ -177,6 +185,7 @@ def let_user_choose(matches: list[dict]) -> dict | None:
 # ============================================================
 # 主流程：解析用户输入 → ETF 代码
 # ============================================================
+
 
 def resolve_etf_code(user_input: str, allow_llm: bool = True) -> dict | None:
     """

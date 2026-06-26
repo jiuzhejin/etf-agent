@@ -20,6 +20,7 @@ def _load_terminal_menu():
     """按需加载 simple-term-menu；未安装时返回 None 走文本回退。"""
     try:
         from simple_term_menu import TerminalMenu
+
         return TerminalMenu
     except ImportError:
         return None
@@ -53,6 +54,7 @@ def _sanitize(text: str) -> str:
 # ============================================================
 # 单选
 # ============================================================
+
 
 def select(options: list[str], title: str = "", default: int = 0) -> int | None:
     """方向键单选。返回选中索引；ESC/q 取消返回 None。"""
@@ -92,8 +94,10 @@ def _text_select(options: list[str], title: str) -> int | None:
 # 多选
 # ============================================================
 
-def multiselect(options: list[str], title: str = "",
-                preselect_all: bool = True) -> list[int] | None:
+
+def multiselect(
+    options: list[str], title: str = "", preselect_all: bool = True
+) -> list[int] | None:
     """
     方向键多选（空格勾选 / 回车确认）。返回选中索引列表；
     ESC 取消返回 None；一个都没勾返回 []。
@@ -121,8 +125,7 @@ def multiselect(options: list[str], title: str = "",
     return _text_multiselect(options, title, preselect_all)
 
 
-def _text_multiselect(options: list[str], title: str,
-                      preselect_all: bool) -> list[int] | None:
+def _text_multiselect(options: list[str], title: str, preselect_all: bool) -> list[int] | None:
     if title:
         print(title)
     for i, o in enumerate(options, 1):
@@ -144,6 +147,7 @@ def _text_multiselect(options: list[str], title: str,
 # ============================================================
 # 确认 / 文本输入
 # ============================================================
+
 
 def confirm(prompt: str, default: bool = False) -> bool:
     """是/否确认。回车取默认值。"""

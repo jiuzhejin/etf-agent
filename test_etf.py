@@ -3,7 +3,6 @@ ETF 投资研报 Agent 测试
 自动化测试（不调 LLM 的部分）+ 手动测试清单
 """
 
-import sys
 import json
 from pathlib import Path
 
@@ -27,7 +26,7 @@ def check(name, condition, detail=""):
 
 print("\n=== 1. ETF 代码解析 ===\n")
 
-from etf_resolver import is_pure_code, validate_code, fuzzy_match, load_etf_list
+from etf_resolver import fuzzy_match, is_pure_code, load_etf_list, validate_code
 
 # 1.1 纯数字判断
 check("纯6位数字", is_pure_code("512980") == True)
@@ -61,6 +60,7 @@ check("模糊匹配'ETF'有多个结果", len(matches3) > 1)
 
 # 1.5 从文本提取代码
 import re
+
 text = "帮我看看510500的走势"
 code_match = re.search(r"\d{6}", text)
 check("从文本提取6位数字", code_match is not None and code_match.group() == "510500")
@@ -112,9 +112,9 @@ else:
 
 print("\n=== 3. 指标计算 ===\n")
 
-from etf_data import calculate_indicators
 import pandas as pd
-import numpy as np
+
+from etf_data import calculate_indicators
 
 # 3.1 用已有缓存数据测试
 if cached_files:
@@ -142,16 +142,20 @@ if cached_files:
 
         # 均线形态
         check("有 ma_pattern", "ma_pattern" in indicators)
-        check("ma_pattern 是有效值",
-              indicators["ma_pattern"] in ["多头排列", "空头排列", "缠绕震荡", "数据不足"])
+        check(
+            "ma_pattern 是有效值",
+            indicators["ma_pattern"] in ["多头排列", "空头排列", "缠绕震荡", "数据不足"],
+        )
 
         # MACD
         check("有 macd", "macd" in indicators)
         check("有 macd.dif", "dif" in indicators["macd"])
         check("有 macd.dea", "dea" in indicators["macd"])
         check("有 macd.signal", "signal" in indicators["macd"])
-        check("macd.signal 是有效值",
-              indicators["macd"]["signal"] in ["金叉", "死叉", "DIF在DEA上方", "DIF在DEA下方"])
+        check(
+            "macd.signal 是有效值",
+            indicators["macd"]["signal"] in ["金叉", "死叉", "DIF在DEA上方", "DIF在DEA下方"],
+        )
 
         # RSI
         check("有 rsi_14", "rsi_14" in indicators)
@@ -167,8 +171,10 @@ if cached_files:
         check("有 boll.upper", "upper" in indicators["boll"])
         check("有 boll.mid", "mid" in indicators["boll"])
         check("有 boll.lower", "lower" in indicators["boll"])
-        check("upper > mid > lower",
-              indicators["boll"]["upper"] > indicators["boll"]["mid"] > indicators["boll"]["lower"])
+        check(
+            "upper > mid > lower",
+            indicators["boll"]["upper"] > indicators["boll"]["mid"] > indicators["boll"]["lower"],
+        )
 
         # KDJ
         check("有 kdj", "kdj" in indicators)
@@ -189,23 +195,24 @@ if cached_files:
         check("有 stale 标记", "stale" in indicators["data_quality"])
 
         # 3.2 指标数值合理性
-        check("价格在均线合理范围",
-              indicators["price"] > 0 and indicators["price"] < 10000)
+        check("价格在均线合理范围", indicators["price"] > 0 and indicators["price"] < 10000)
         check("量比非负", indicators["volume_ratio"] is None or indicators["volume_ratio"] >= 0)
 
 else:
     print("  (无缓存数据，跳过指标测试)")
 
 # 3.3 数据不足时的处理
-short_df = pd.DataFrame({
-    "日期": ["2026-01-01"] * 10,
-    "开盘": [1.0] * 10,
-    "收盘": [1.0] * 10,
-    "最高": [1.0] * 10,
-    "最低": [1.0] * 10,
-    "成交量": [100] * 10,
-    "涨跌幅": [0.0] * 10,
-})
+short_df = pd.DataFrame(
+    {
+        "日期": ["2026-01-01"] * 10,
+        "开盘": [1.0] * 10,
+        "收盘": [1.0] * 10,
+        "最高": [1.0] * 10,
+        "最低": [1.0] * 10,
+        "成交量": [100] * 10,
+        "涨跌幅": [0.0] * 10,
+    }
+)
 result = calculate_indicators(short_df)
 check("数据不足时返回 None", result is None)
 
@@ -266,11 +273,14 @@ check("研报含免责脚注", "不构成投资建议" in output_valid)
 offenum_report = dict(mock_report, action={"if_empty": "梭哈", "if_holding": "持有"})
 output_offenum = format_report(offenum_report, etf_name="测试", code="000001")
 check("越界 if_empty 被标记", "梭哈" in output_offenum and "非标准值" in output_offenum)
-check("同报告里合法的 if_holding 不被标记",
-      "若已持有: 持有\n" in output_offenum or "若已持有: 持有" in output_offenum.split("理由")[0])
+check(
+    "同报告里合法的 if_holding 不被标记",
+    "若已持有: 持有\n" in output_offenum or "若已持有: 持有" in output_offenum.split("理由")[0],
+)
 
 # 4.6 代码块剥离
 from etf_analyzer import _strip_code_fence
+
 check("剥离 ```json 包裹", _strip_code_fence('```json\n{"a":1}\n```') == '{"a":1}')
 check("剥离 ``` 包裹", _strip_code_fence('```\n{"a":1}\n```') == '{"a":1}')
 check("无包裹原样返回", _strip_code_fence('{"a":1}') == '{"a":1}')
@@ -293,6 +303,7 @@ print("\n=== 5. 主流程逻辑 ===\n")
 
 # 5.1 refresh 前无标的
 import main as m
+
 m.current_code = None
 m.current_indicators = None
 check("无标的时 current_code 为 None", m.current_code is None)
@@ -322,15 +333,18 @@ def _mk_df(prices):
     """用收盘价序列造一个最简历史 DataFrame（≥60条供指标计算）"""
     n = len(prices)
     s = pd.Series(prices)
-    return pd.DataFrame({
-        "日期": [f"2026-{(i // 28) % 12 + 1:02d}-{i % 28 + 1:02d}" for i in range(n)],
-        "开盘": prices,
-        "收盘": prices,
-        "最高": [p * 1.005 for p in prices],
-        "最低": [p * 0.995 for p in prices],
-        "成交量": [1000 + i for i in range(n)],
-        "涨跌幅": (s.pct_change().fillna(0) * 100).tolist(),
-    })
+    return pd.DataFrame(
+        {
+            "日期": [f"2026-{(i // 28) % 12 + 1:02d}-{i % 28 + 1:02d}" for i in range(n)],
+            "开盘": prices,
+            "收盘": prices,
+            "最高": [p * 1.005 for p in prices],
+            "最低": [p * 0.995 for p in prices],
+            "成交量": [1000 + i for i in range(n)],
+            "涨跌幅": (s.pct_change().fillna(0) * 100).tolist(),
+        }
+    )
+
 
 # 6.1 MACD 背离符号修复（回归测试）
 # 深跌后缓慢爬升：价格回到近30日高点，但 DIF 仍为负。
@@ -340,9 +354,11 @@ neg_dif_prices = [2.0 - 0.8 * i / 44 for i in range(45)]
 _base = neg_dif_prices[-1]
 neg_dif_prices += [_base + 0.06 * i / 29 for i in range(30)]
 ind_neg = calculate_indicators(_mk_df(neg_dif_prices))
-check("DIF为负+价格近高点 不误报顶背离",
-      ind_neg["macd"]["divergence"] == "无明显背离",
-      f'实际: {ind_neg["macd"]["divergence"]}')
+check(
+    "DIF为负+价格近高点 不误报顶背离",
+    ind_neg["macd"]["divergence"] == "无明显背离",
+    f"实际: {ind_neg['macd']['divergence']}",
+)
 
 # 6.2 真顶背离仍能识别（价格新高，动能减弱）
 top_prices = [1.5] * 30
@@ -350,8 +366,11 @@ top_prices += [1.5 + 0.5 * i / 14 for i in range(15)]
 top_prices += [2.0 - 0.25 * i / 9 for i in range(10)]
 top_prices += [1.75 + 0.30 * i / 14 for i in range(15)]
 ind_top = calculate_indicators(_mk_df(top_prices))
-check("真顶背离能识别", ind_top["macd"]["divergence"] == "疑似顶背离",
-      f'实际: {ind_top["macd"]["divergence"]}')
+check(
+    "真顶背离能识别",
+    ind_top["macd"]["divergence"] == "疑似顶背离",
+    f"实际: {ind_top['macd']['divergence']}",
+)
 
 # 6.3 真底背离仍能识别（价格新低，动能抬升）
 bot_prices = [2.0] * 30
@@ -359,25 +378,25 @@ bot_prices += [2.0 - 0.5 * i / 14 for i in range(15)]
 bot_prices += [1.5 + 0.25 * i / 9 for i in range(10)]
 bot_prices += [1.75 - 0.30 * i / 14 for i in range(15)]
 ind_bot = calculate_indicators(_mk_df(bot_prices))
-check("真底背离能识别", ind_bot["macd"]["divergence"] == "疑似底背离",
-      f'实际: {ind_bot["macd"]["divergence"]}')
+check(
+    "真底背离能识别",
+    ind_bot["macd"]["divergence"] == "疑似底背离",
+    f"实际: {ind_bot['macd']['divergence']}",
+)
 
 # 6.4 背离标签始终是三个合法值之一
-check("背离标签合法",
-      ind_neg["macd"]["divergence"] in ["疑似顶背离", "疑似底背离", "无明显背离"])
+check("背离标签合法", ind_neg["macd"]["divergence"] in ["疑似顶背离", "疑似底背离", "无明显背离"])
 
 # 6.5 盘中（未收盘）量比加警示
 flat_prices = [1.5 + 0.001 * i for i in range(60)]
 ind_intraday = calculate_indicators(_mk_df(flat_prices), settled=False)
 check("盘中时有量比警示", "volume_ratio_note" in ind_intraday)
-check("盘中时 volume_status 带盘中标注",
-      "盘中" in ind_intraday.get("volume_status", ""))
+check("盘中时 volume_status 带盘中标注", "盘中" in ind_intraday.get("volume_status", ""))
 
 # 6.6 已收盘（默认）不加警示
 ind_settled = calculate_indicators(_mk_df(flat_prices), settled=True)
 check("已收盘无量比警示", "volume_ratio_note" not in ind_settled)
-check("已收盘 volume_status 无盘中标注",
-      "盘中" not in ind_settled.get("volume_status", ""))
+check("已收盘 volume_status 无盘中标注", "盘中" not in ind_settled.get("volume_status", ""))
 
 # 6.7 settled 默认从 df.attrs 读取，缺省视为已收盘
 ind_default = calculate_indicators(_mk_df(flat_prices))
@@ -391,6 +410,7 @@ check("settled 缺省视为已收盘", "volume_ratio_note" not in ind_default)
 print("\n=== 7. 自选池 watchlist ===\n")
 
 import tempfile
+
 import watchlist as wl
 
 # 存储指到临时目录，不污染真实 cache/
@@ -407,8 +427,9 @@ ok2, _ = wl.add_item(d, "512980", "x", "持仓")
 check("重复代码去重", ok2 is False and len(wl.all_items(d)) == 1)
 wl.add_item(d, "510300", "沪深300", "持仓")
 check("按组取标的", [i["code"] for i in wl.items_in_group(d, "持仓")] == ["510300"])
-check("移动标的", wl.move_codes(d, ["512980"], "持仓") == 1
-      and len(wl.items_in_group(d, "持仓")) == 2)
+check(
+    "移动标的", wl.move_codes(d, ["512980"], "持仓") == 1 and len(wl.items_in_group(d, "持仓")) == 2
+)
 ok3, _ = wl.add_group(d, "宽基")
 check("新建组", ok3 and "宽基" in wl.groups(d))
 ok4, _ = wl.rename_group(d, "宽基", "大盘")
@@ -425,8 +446,9 @@ check("删除标的", wl.remove_codes(d, ["510300"]) == 1)
 wl.save(d)
 check("save 落盘", wl._FILE.exists())
 d2 = wl.load()
-check("load 回读一致",
-      [i["code"] for i in wl.all_items(d2)] == [i["code"] for i in wl.all_items(d)])
+check(
+    "load 回读一致", [i["code"] for i in wl.all_items(d2)] == [i["code"] for i in wl.all_items(d)]
+)
 wl.add_item(d2, "159915", "创业板", "大盘")
 wl.save(d2)
 check("二次写生成 .bak", wl._BAK.exists())
@@ -435,8 +457,9 @@ d3 = wl.load()
 check("损坏主文件回退 .bak", any(i["code"] == "512980" for i in wl.all_items(d3)))
 
 # normalize 容错
-norm = wl._normalize({"version": 1, "groups": ["A"],
-                      "items": [{"code": "512980", "name": "x", "group": "B"}]})
+norm = wl._normalize(
+    {"version": 1, "groups": ["A"], "items": [{"code": "512980", "name": "x", "group": "B"}]}
+)
 check("normalize 补未知组", "B" in norm["groups"])
 dup = wl._normalize({"groups": ["A"], "items": [{"code": "1"}, {"code": "1"}]})
 check("normalize 按 code 去重", len(dup["items"]) == 1)
@@ -450,9 +473,10 @@ print("\n=== 8. 批量快筛 batch ===\n")
 
 import batch as bt
 
-check("score_num 解析",
-      bt._score_num("7.5") == 7.5 and bt._score_num("?") == -1.0
-      and bt._score_num("5/10") == 5.0)
+check(
+    "score_num 解析",
+    bt._score_num("7.5") == 7.5 and bt._score_num("?") == -1.0 and bt._score_num("5/10") == 5.0,
+)
 check("mark_short 合法值原样", bt._mark_short("观望", {"建仓", "观望"}) == "观望")
 check("mark_short 越界标⚠", bt._mark_short("梭哈", {"持有"}) == "梭哈⚠")
 check("mark_short 缺失→?", bt._mark_short("?", {"持有"}) == "?")
@@ -480,9 +504,18 @@ def _fake_ind(df):
 
 def _fake_lite(ind, etf_name=""):
     _lite_calls["n"] += 1
-    return {"score": "6", "if_empty": "观望", "if_holding": "持有", "reason": "x",
-            "_usage": {"prompt_tokens": 100, "completion_tokens": 10,
-                       "cache_hit_tokens": 0, "cache_miss_tokens": 100}}
+    return {
+        "score": "6",
+        "if_empty": "观望",
+        "if_holding": "持有",
+        "reason": "x",
+        "_usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "cache_hit_tokens": 0,
+            "cache_miss_tokens": 100,
+        },
+    }
 
 
 bt.fetch_etf_history = _fake_fetch
@@ -490,16 +523,16 @@ bt.calculate_indicators = _fake_ind
 bt.analyze_etf_lite = _fake_lite
 bt._LITE_CACHE = _tmp / "lite_cache2.json"  # 干净缓存起步
 
-_items = [{"code": "512980", "name": "传媒"},
-          {"code": "111111", "name": "盘中"},
-          {"code": "999999", "name": "坏"}]
+_items = [
+    {"code": "512980", "name": "传媒"},
+    {"code": "111111", "name": "盘中"},
+    {"code": "999999", "name": "坏"},
+]
 res, st = bt.run_batch(_items)
 check("run_batch 行数=输入数", len(res) == 3)
 check("失败标的有 error", any(r["error"] for r in res if r["code"] == "999999"))
-check("盘中 settled=False",
-      [r for r in res if r["code"] == "111111"][0]["settled"] is False)
-check("成功标的有评分",
-      [r for r in res if r["code"] == "512980"][0]["score"] == "6")
+check("盘中 settled=False", [r for r in res if r["code"] == "111111"][0]["settled"] is False)
+check("成功标的有评分", [r for r in res if r["code"] == "512980"][0]["score"] == "6")
 check("token 累计正确", st["completion_tokens"] == 20)  # 2 次成功调用 × 10
 
 res2, st2 = bt.run_batch(_items)
@@ -519,8 +552,10 @@ import etf_analyzer as ea
 check("LITE 保留风控纪律", "操作纪律（风控优先" in ea.SYSTEM_PROMPT_LITE)
 check("LITE 保留字段说明", "## 你会收到的数据字段说明" in ea.SYSTEM_PROMPT_LITE)
 check("LITE 砍掉 11 项研报字段", "ma_analysis" not in ea.SYSTEM_PROMPT_LITE)
-check("LITE 含精简输出字段",
-      "if_empty" in ea.SYSTEM_PROMPT_LITE and "if_holding" in ea.SYSTEM_PROMPT_LITE)
+check(
+    "LITE 含精简输出字段",
+    "if_empty" in ea.SYSTEM_PROMPT_LITE and "if_holding" in ea.SYSTEM_PROMPT_LITE,
+)
 check("研报 Prompt 仍完整(对照)", "ma_analysis" in ea.SYSTEM_PROMPT)
 check("LITE 比研报短", len(ea.SYSTEM_PROMPT_LITE) < len(ea.SYSTEM_PROMPT))
 
@@ -569,15 +604,23 @@ check("唯一一对→自动填", auto2 is not None)
 check("自动填 C 代码正确", auto2 and auto2["c"]["code"] == "014111")
 
 # 不含"联接"的 ETF 本身不会被当候选
-check("ETF 本身不入候选", all("联接" in p["a"]["name"] for p in pairs)
-      and all(p["a"]["code"] != "159915" for p in pairs))
+check(
+    "ETF 本身不入候选",
+    all("联接" in p["a"]["name"] for p in pairs) and all(p["a"]["code"] != "159915" for p in pairs),
+)
 
 # feeder_cell 显示（临时 map，不污染真实 cache）
 fd._MAP_FILE = _tmp / "etf_feeder_map.json"
 fd._map_cache = None
-fd.save_map({"562800": {"name": "x",
-                        "a": {"code": "014110", "name": "..A"},
-                        "c": {"code": "014111", "name": "..C"}}})
+fd.save_map(
+    {
+        "562800": {
+            "name": "x",
+            "a": {"code": "014110", "name": "..A"},
+            "c": {"code": "014111", "name": "..C"},
+        }
+    }
+)
 check("feeder_cell 优先 C", fd.feeder_cell("562800") == "014111 C")
 check("未映射→—", fd.feeder_cell("999999") == "—")
 
@@ -597,9 +640,9 @@ check("手动设置假代码被拒", bad_m is False)
 # 总结
 # ============================================================
 
-print(f"\n{'='*50}")
+print(f"\n{'=' * 50}")
 print(f"  测试结果: {passed} 通过, {failed} 失败")
-print(f"{'='*50}")
+print(f"{'=' * 50}")
 
 if failed > 0:
     print("\n需要修复以上失败的测试用例")

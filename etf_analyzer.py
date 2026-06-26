@@ -3,11 +3,13 @@ ETF 分析模块
 接收本地计算好的指标 dict → 调用 LLM → 返回结构化研报
 """
 
+import hashlib
 import json
 import os
-import hashlib
 import warnings
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 
 def _get_llm_config():
     # DeepSeek 走 Anthropic 格式端点，复用 anthropic SDK，只换 base_url/key/model
@@ -25,6 +27,7 @@ def _get_openai_base_url():
         return url
     base = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com/anthropic")
     return base[: -len("/anthropic")] if base.endswith("/anthropic") else base
+
 
 SYSTEM_PROMPT = """你是一位专业的 ETF 技术分析师。你只基于用户提供的技术指标数据进行分析，不编造任何基本面信息。
 
@@ -226,7 +229,7 @@ SYSTEM_PROMPT_LITE = (
     "你无法得知用户当前是否持有该 ETF，因此操作建议必须分「空仓」和「已持有」"
     "两个分支分别给出（同一技术面信号对两类用户含义往往相反）。\n\n"
     "严格按以下 JSON 格式返回，不要输出任何 JSON 以外的内容。"
-    "字符串值内部若要引用词语，一律用中文引号「」，绝不用英文双引号 \" —— 它会破坏 JSON。\n\n"
+    '字符串值内部若要引用词语，一律用中文引号「」，绝不用英文双引号 " —— 它会破坏 JSON。\n\n'
     "```json\n"
     "{\n"
     '  "score": "1-10 的综合评分，按上面四维度口径综合得出，可带一位小数",\n'
@@ -254,6 +257,7 @@ def ask_followup(indicators: dict, etf_name: str, user_question: str):
     直接打印到终端，不返回值
     """
     import anthropic
+
     api_key, base_url, model = _get_llm_config()
     client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
 
@@ -300,6 +304,7 @@ def _repair_json_with_llm(broken: str) -> str | None:
     """
     try:
         import anthropic
+
         api_key, base_url, _ = _get_llm_config()
         fast_model = os.environ.get("LLM_MODEL_FAST", "deepseek-chat")
         client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
@@ -322,6 +327,7 @@ def analyze_etf(indicators: dict, etf_name: str = "") -> dict | None:
     # 研报需要结构化 JSON，启用 DeepSeek JSON Mode（response_format）硬保证输出是合法 JSON。
     # JSON Mode 是 OpenAI 格式特性，故这里用 OpenAI SDK + OpenAI 端点（不能用 anthropic 端点）。
     from openai import OpenAI
+
     api_key, _, model = _get_llm_config()
     client = OpenAI(api_key=api_key, base_url=_get_openai_base_url())
 
@@ -333,6 +339,7 @@ def analyze_etf(indicators: dict, etf_name: str = "") -> dict | None:
     user_content += "\n请根据以上数据进行分析，严格按照要求的 JSON 格式输出。"
 
     import threading
+
     stop_event = threading.Event()
     status = ["正在生成研报"]
     spinner_thread = None
@@ -436,6 +443,7 @@ def analyze_etf_lite(indicators: dict, etf_name: str = "") -> dict:
     DeepSeek prompt 缓存。
     """
     from openai import OpenAI
+
     api_key, _, model = _get_llm_config()
 
     def _fail(msg: str) -> dict:
@@ -512,14 +520,15 @@ def _mark_action(value, valid: set) -> str:
     return f"{value}  ⚠ 非标准值（不在预设建议内）"
 
 
-def format_report(report: dict, etf_name: str = "", code: str = "",
-                   data_quality: dict = None) -> str:
+def format_report(
+    report: dict, etf_name: str = "", code: str = "", data_quality: dict = None
+) -> str:
     """把结构化研报 dict 格式化成可读的文本"""
     if not report:
         return "分析失败"
 
     lines = []
-    lines.append(f"{'='*50}")
+    lines.append(f"{'=' * 50}")
     lines.append(f"  {etf_name}（{code}）技术分析研报")
 
     # 数据时效提示
@@ -530,7 +539,7 @@ def format_report(report: dict, etf_name: str = "", code: str = "",
         else:
             lines.append(f"  数据截至 {as_of}")
 
-    lines.append(f"{'='*50}")
+    lines.append(f"{'=' * 50}")
 
     # 操作建议（最重要，放最前面）
     # 没有持仓数据，所以按"空仓/已持有"两个分支给建议
@@ -553,51 +562,51 @@ def format_report(report: dict, etf_name: str = "", code: str = "",
 
     # 当前状态
     current = report.get("current", {})
-    lines.append(f"\n--- 当前状态 ---")
+    lines.append("\n--- 当前状态 ---")
     lines.append(f"  价格: {current.get('price', '?')}  涨跌: {current.get('change_pct', '?')}")
     lines.append(f"  {current.get('summary', '')}")
 
     # 均线分析
     ma = report.get("ma_analysis", {})
-    lines.append(f"\n--- 均线分析 ---")
+    lines.append("\n--- 均线分析 ---")
     lines.append(f"  形态: {ma.get('pattern', '?')}")
     lines.append(f"  {ma.get('detail', '')}")
 
     # 动量指标
     momentum = report.get("momentum", {})
-    lines.append(f"\n--- 动量指标 ---")
+    lines.append("\n--- 动量指标 ---")
     lines.append(f"  MACD: {momentum.get('macd', '?')}")
     lines.append(f"  RSI:  {momentum.get('rsi', '?')}")
     lines.append(f"  KDJ:  {momentum.get('kdj', '?')}")
 
     # 量价分析
     vol = report.get("volume", {})
-    lines.append(f"\n--- 量价分析 ---")
+    lines.append("\n--- 量价分析 ---")
     lines.append(f"  量比: {vol.get('ratio', '?')}")
     lines.append(f"  {vol.get('analysis', '')}")
 
     # 布林带
     boll = report.get("bollinger", {})
-    lines.append(f"\n--- 布林带 ---")
+    lines.append("\n--- 布林带 ---")
     lines.append(f"  位置: {boll.get('position', '?')}")
     lines.append(f"  {boll.get('analysis', '')}")
 
     # 支撑阻力
     sr = report.get("support_resistance", {})
-    lines.append(f"\n--- 支撑/阻力 ---")
+    lines.append("\n--- 支撑/阻力 ---")
     lines.append(f"  支撑: {sr.get('support', '?')}  阻力: {sr.get('resistance', '?')}")
     lines.append(f"  {sr.get('analysis', '')}")
 
     # 风险提示
     risk = report.get("risk", {})
-    lines.append(f"\n--- 风险提示 ---")
+    lines.append("\n--- 风险提示 ---")
     lines.append(f"  最大回撤: {risk.get('max_drawdown', '?')}")
     lines.append(f"  波动率: {risk.get('volatility', '?')}")
     warnings = risk.get("warnings", [])
     for w in warnings:
         lines.append(f"  ⚠ {w}")
 
-    lines.append(f"\n{'='*50}")
+    lines.append(f"\n{'=' * 50}")
     lines.append("  仅基于单只标的的短线技术指标，未考虑估值/基本面、你的持仓成本与")
     lines.append("  期限、仓位占比与集中度（多只同类高beta=押同一个风险）；不构成投资建议。")
 
@@ -614,16 +623,36 @@ if __name__ == "__main__":
         "price": 1.964,
         "change_pct": -1.9,
         "date": "2026-05-28",
-        "ma": {"ma5": 2.012, "ma10": 2.0236, "ma20": 2.0716, "ma60": 1.9561, "ma120": 1.905, "ma250": 1.6929},
+        "ma": {
+            "ma5": 2.012,
+            "ma10": 2.0236,
+            "ma20": 2.0716,
+            "ma60": 1.9561,
+            "ma120": 1.905,
+            "ma250": 1.6929,
+        },
         "ma_pattern": "缠绕震荡",
         "ma20_slope": "走平",
-        "macd": {"dif": -0.0006, "dea": 0.0176, "histogram": -0.0365, "signal": "DIF在DEA下方", "divergence": "无明显背离"},
+        "macd": {
+            "dif": -0.0006,
+            "dea": 0.0176,
+            "histogram": -0.0365,
+            "signal": "DIF在DEA下方",
+            "divergence": "无明显背离",
+        },
         "rsi_14": 23.1,
         "rsi_status": "超卖",
         "volume_ratio": 0.48,
         "volume_status": "缩量",
         "vol_price_relation": "跌+缩量（自然回调）",
-        "boll": {"upper": 2.2008, "mid": 2.0716, "lower": 1.9425, "bandwidth_pct": 12.47, "position": "接近下轨", "trend": "扩张"},
+        "boll": {
+            "upper": 2.2008,
+            "mid": 2.0716,
+            "lower": 1.9425,
+            "bandwidth_pct": 12.47,
+            "position": "接近下轨",
+            "trend": "扩张",
+        },
         "kdj": {"k": 19.1, "d": 25.2, "j": 7.0, "status": "正常"},
         "atr_14": 0.0584,
         "atr_pct": 2.97,

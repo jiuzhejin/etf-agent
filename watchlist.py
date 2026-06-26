@@ -38,6 +38,7 @@ DEFAULT_GROUP = "观察"
 # 读写
 # ============================================================
 
+
 def _empty() -> dict:
     return {"version": 1, "groups": list(DEFAULT_GROUPS), "items": []}
 
@@ -60,13 +61,15 @@ def _normalize(data) -> dict:
         group = it.get("group") or DEFAULT_GROUP
         if group not in groups:
             groups.append(group)
-        clean.append({
-            "code": code,
-            "name": it.get("name", ""),
-            "group": group,
-            "added": it.get("added", ""),
-            "note": it.get("note", ""),
-        })
+        clean.append(
+            {
+                "code": code,
+                "name": it.get("name", ""),
+                "group": group,
+                "added": it.get("added", ""),
+                "note": it.get("note", ""),
+            }
+        )
     if not groups:
         groups = list(DEFAULT_GROUPS)
     return {"version": 1, "groups": groups, "items": clean}
@@ -108,6 +111,7 @@ def save(data: dict) -> None:
 # 查询
 # ============================================================
 
+
 def has(data: dict, code: str) -> bool:
     code = str(code).strip()
     return any(it["code"] == code for it in data["items"])
@@ -129,8 +133,10 @@ def groups(data: dict) -> list[str]:
 # 标的增删改
 # ============================================================
 
-def add_item(data: dict, code: str, name: str = "",
-             group: str = DEFAULT_GROUP, note: str = "") -> tuple[bool, str]:
+
+def add_item(
+    data: dict, code: str, name: str = "", group: str = DEFAULT_GROUP, note: str = ""
+) -> tuple[bool, str]:
     """加入一只 ETF。按 code 去重；组不存在则自动创建。"""
     code = str(code).strip()
     if not code:
@@ -140,13 +146,15 @@ def add_item(data: dict, code: str, name: str = "",
         return False, f"{code} 已在自选池「{cur['group']}」"
     if group not in data["groups"]:
         data["groups"].append(group)
-    data["items"].append({
-        "code": code,
-        "name": name,
-        "group": group,
-        "added": date.today().isoformat(),
-        "note": note,
-    })
+    data["items"].append(
+        {
+            "code": code,
+            "name": name,
+            "group": group,
+            "added": date.today().isoformat(),
+            "note": note,
+        }
+    )
     return True, f"已加入「{group}」: {code} {name}".rstrip()
 
 
@@ -198,6 +206,7 @@ def update_names(data: dict, name_lookup) -> int:
 # 组增删改
 # ============================================================
 
+
 def add_group(data: dict, name: str) -> tuple[bool, str]:
     name = name.strip()
     if not name:
@@ -237,12 +246,15 @@ def delete_group(data: dict, name: str, reassign_to: str | None = None) -> tuple
     data["groups"] = [g for g in data["groups"] if g != name]
     if not data["groups"]:
         data["groups"] = list(DEFAULT_GROUPS)
-    return True, f"已删除组「{name}」" + (f"（{len(members)} 只迁到「{reassign_to}」）" if members else "")
+    return True, f"已删除组「{name}」" + (
+        f"（{len(members)} 只迁到「{reassign_to}」）" if members else ""
+    )
 
 
 # ============================================================
 # 冷启动：从历史缓存导入
 # ============================================================
+
 
 def import_from_cache(data: dict, name_lookup=None, group: str = DEFAULT_GROUP) -> int:
     """
@@ -265,13 +277,15 @@ def import_from_cache(data: dict, name_lookup=None, group: str = DEFAULT_GROUP) 
                 name = name_lookup(code) or ""
             except Exception:
                 name = ""
-        data["items"].append({
-            "code": code,
-            "name": name,
-            "group": group,
-            "added": date.today().isoformat(),
-            "note": "",
-        })
+        data["items"].append(
+            {
+                "code": code,
+                "name": name,
+                "group": group,
+                "added": date.today().isoformat(),
+                "note": "",
+            }
+        )
         existing.add(code)
         added += 1
     return added
