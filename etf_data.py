@@ -75,6 +75,10 @@ def _fetch_realtime_sina(code: str) -> dict | None:
         if not data:
             return None
         f = data.split(",")
+        # 新浪 f[32] 在盘中也返回 '00'，无法用来判"已收盘"；改用行情时间
+        # f[31]（HH:MM:SS）与腾讯口径对齐：>=15:00 才算已收盘。
+        quote_time = f[31] if len(f) > 31 else ""
+        hour = int(quote_time[:2]) if len(quote_time) >= 2 and quote_time[:2].isdigit() else 0
         return {
             "日期": f[30],
             "开盘": float(f[1]),
@@ -82,7 +86,7 @@ def _fetch_realtime_sina(code: str) -> dict | None:
             "最高": float(f[4]),
             "最低": float(f[5]),
             "成交量_股": float(f[8]),
-            "settled": f[32] == "00",  # 00=已收盘，数据已确定
+            "settled": hour >= 15,
         }
     except Exception:
         return None
