@@ -106,6 +106,7 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
             "if_empty": "?",
             "if_holding": "?",
             "reason": "",
+            "breakdown": "",
             "settled": True,
             "date": "",
             "from_cache": False,
@@ -140,8 +141,8 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
         # lite 缓存命中（仅 settled 才缓存）→ 零 token
         if settled and key in lite_cache:
             cached = lite_cache[key]
-            for k in ("score", "if_empty", "if_holding", "reason"):
-                row[k] = cached.get(k, "?")
+            for k in ("score", "if_empty", "if_holding", "reason", "breakdown"):
+                row[k] = cached.get(k, "?" if k != "breakdown" else "")
             row["from_cache"] = True
             stats["cache_hits"] += 1
             results.append(row)
@@ -150,8 +151,8 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
         # 调 LLM lite
         out = analyze_etf_lite(indicators, etf_name=name)
         stats["llm_calls"] += 1
-        for k in ("score", "if_empty", "if_holding", "reason"):
-            row[k] = out.get(k, "?")
+        for k in ("score", "if_empty", "if_holding", "reason", "breakdown"):
+            row[k] = out.get(k, "?" if k != "breakdown" else "")
         if out.get("_error"):
             row["error"] = out["_error"]
         usage = out.get("_usage")
@@ -166,7 +167,9 @@ def run_batch(items: list[dict]) -> tuple[list[dict], dict]:
 
         # 写 lite 缓存（仅 settled 且成功）
         if settled and not out.get("_error"):
-            lite_cache[key] = {k: out.get(k) for k in ("score", "if_empty", "if_holding", "reason")}
+            lite_cache[key] = {
+                k: out.get(k) for k in ("score", "if_empty", "if_holding", "reason", "breakdown")
+            }
             dirty = True
 
         results.append(row)
@@ -263,6 +266,8 @@ def render(results: list[dict], stats: dict, title: str = "批量快筛") -> Non
             hold_cell = f"[green]{hold_cell}[/green]"
 
         reason = r["reason"]
+        if r.get("breakdown"):
+            reason += f"  [dim]〔{r['breakdown']}〕[/dim]"
         if r["from_cache"]:
             reason += "  [dim](缓存)[/dim]"
         table.add_row(
