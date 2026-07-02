@@ -348,7 +348,12 @@ def fetch_etf_history(code: str, days: int = 250) -> pd.DataFrame | None:
             else:
                 full_df = cached_df
 
-            _save_cache(code, full_df)
+            # 只把已收盘（< today）的行落盘：增量源盘中可能返回今天的临时 bar，
+            # 直接缓存会把未收盘快照当成收盘价存下来，违背“当日数据不缓存”。
+            # 今天这根留给 _append_realtime，由它按 settled 决定是否写缓存。
+            settled_df = full_df[full_df["日期"] < today_str]
+            if not settled_df.empty:
+                _save_cache(code, settled_df)
             full_df = _append_realtime(full_df, code)
             return full_df.tail(days)
 
@@ -518,13 +523,19 @@ def calculate_indicators(df: pd.DataFrame, settled: bool = None) -> dict | None:
             result["macd"]["divergence"] = "无明显背离"
 
     # ---- P0: RSI ----
+    # 用 Wilder 平滑（递归 EMA, alpha=1/14），与通达信/同花顺/东财等看盘软件口径一致，
+    # 也和本文件 KDJ 的递归平滑统一。不能用 rolling(14).mean()（等权 SMA）——那样波动
+    # 偏大、且 14 天前的一根 K 掉出窗口时会产生无意义跳变，套 70/30 阈值会频繁误报超买超卖。
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = (-delta).clip(lower=0)
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-    rs = avg_gain / avg_loss
+    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
+    # avg_loss=0（近期全涨）时 rs=inf → rsi=100，结果正确但会产生除零 warning，
+    # 用 where 把分母的 0 换成 nan 再算，纯上涨时直接判为 100。
+    rs = avg_gain / avg_loss.where(avg_loss != 0)
     rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.where(avg_loss != 0, 100.0)
 
     rsi_value = round(rsi.iloc[-1], 1)
     result["rsi_14"] = rsi_value
