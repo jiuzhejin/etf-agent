@@ -1,6 +1,10 @@
 # ETF 投资研报 Agent
 
-输入 ETF 代码或名称，获得一份结构化技术分析研报。支持追问、实时行情、多源降级。
+支持两种使用方式：
+- 交互式 TUI：单只深度研报 / 批量快筛 / 自选池管理
+- 非交互 CLI：`./start.sh analyze ...` 直接输出快筛结果，适合脚本或其他 CLI 调用
+
+交互模式侧重“先批量筛，再单只深挖”；CLI 模式则统一走快筛逻辑，哪怕只传一个标的也返回一条快筛结果。
 
 三种模式（方向键菜单进入）：
 - **单只深度研报** — 完整 11 维技术分析 + 可追问
@@ -75,6 +79,90 @@
 ```
 
 挑出值得细看的，再回主菜单对那几只跑「单只深度研报」。**批量当漏斗，深度当聚焦。**
+
+### 非交互 CLI
+
+```bash
+# 单标的快筛（统一走快筛逻辑）
+./start.sh analyze 512880
+
+# 多标的快筛
+./start.sh analyze 512880 510300 513180
+
+# 结构化输出，适合脚本/其他 CLI 调用
+./start.sh analyze 512880 --json
+```
+
+详细的命令格式、JSON 契约和退出码，见下方 `CLI 集成` 章节。
+
+## CLI 集成
+
+如果要从其他脚本或 CLI 调用本项目，推荐只使用这一条接口：
+
+```bash
+./start.sh analyze <symbols...> --json
+```
+
+示例：
+
+```bash
+./start.sh analyze 512880 --json
+./start.sh analyze 512880 510300 513180 --json
+./start.sh analyze 512880,510300,513180 --json
+```
+
+### 命令格式
+
+- 动作固定为 `analyze`
+- 标的支持空格分隔或逗号分隔
+- 追加 `--json` 后，stdout 只输出结构化 JSON，不夹杂进度条或提示文本
+- CLI `analyze` 统一走快筛逻辑；即使只传一个标的，返回的也是同一套批量结构，只是 `results` 里只有一行
+
+### JSON 契约
+
+顶层结构当前固定为：
+
+```json
+{
+  "ok": true,
+  "mode": "batch",
+  "items": [],
+  "invalid_inputs": [],
+  "results": [],
+  "stats": {}
+}
+```
+
+推荐其他脚本稳定依赖这些字段：
+
+- `ok`: 本次调用是否成功
+- `mode`: 当前固定为 `batch`
+- `items`: 成功识别并进入分析的标的列表
+- `invalid_inputs`: 无法识别的输入
+- `results[*].code`: ETF 代码
+- `results[*].name`: ETF 名称
+- `results[*].score`: 快筛评分
+- `results[*].if_empty`: 空仓建议
+- `results[*].if_holding`: 持有建议
+- `results[*].reason`: 一句话理由
+- `results[*].settled`: 是否已收盘
+- `results[*].date`: 数据日期
+- `results[*].error`: 单只分析是否失败；失败时为错误文本，否则为 `null`
+- `stats`: 本次调用的汇总统计（命中缓存、token、成本估算等）
+
+其中：
+
+- `reason` 和 `breakdown` 属于说明性文本，适合展示或作为次级特征，不建议当硬规则字段
+- `stats.cost` 是估算值，适合展示，不建议作为精确结算依据
+
+### 退出码
+
+当前 CLI 退出码约定如下：
+
+- `0`: 命令执行成功；即使 `invalid_inputs` 非空，只要仍有有效标的完成分析，也返回 `0`
+- `2`: 参数错误、未知命令，或没有任何有效输入可供分析
+
+目前 `analyze` 的正常调用路径没有单独定义新的“分析阶段失败”退出码；调用方应优先结合退出码和 JSON 中的 `ok` / `results[*].error` 一起判断。
 
 ## 架构
 
@@ -290,7 +378,9 @@ export DEEPSEEK_API_KEY="你的key"
 ./start.sh
 ```
 
-日常只需要记住一个命令：`./start.sh`。
+日常可以记住两个入口：
+- `./start.sh`：进入交互菜单
+- `./start.sh analyze ...`：直接跑非交互快筛
 
 如果你在本地频繁开发，建议改用 `make` 入口：
 
@@ -313,6 +403,18 @@ make test    # 运行本地测试脚本
 `./init.sh` 会在缺少 `.env` 时自动从 `.env.example` 复制一份；从旧版本升级时，仍建议手动检查 `.env` 里的 key / base_url / 模型配置是否还是你要的值。若只是想单独初始化或重装依赖，再手动执行 `./init.sh`。
 
 依赖清单见 `requirements.txt`，代码风格和 lint 配置在 `pyproject.toml`。其中 `simple-term-menu` 和 `gnureadline` 主要用于更好的终端交互；即使缺失，程序也会自动回退到文本菜单或基础输入模式，不会因为这两个包缺失而直接崩掉。
+
+如果你要把它接到脚本或别的 CLI，上面这组非交互命令已经够用：
+
+```bash
+./start.sh analyze 512880
+./start.sh analyze 512880,510300 --json
+```
+
+说明：
+- CLI `analyze` 统一走批量快筛逻辑，单标的只是 `results` 里只有一行
+- `--json` 只输出结构化 JSON，不夹杂进度条、`找到:`、`正在生成` 之类提示
+- 想看完整 11 维研报和追问，仍然走交互菜单里的「单只深度研报」
 
 启动后用方向键选模式。进「单只深度研报」后：
 
@@ -338,7 +440,7 @@ etf-agent/
 ├── requirements.txt   # Python 依赖清单
 ├── pyproject.toml     # ruff 配置
 ├── .editorconfig      # 基础编辑器规范（缩进/换行/尾随空格）
-├── main.py            # 模式菜单 + 三个模式分发（单只深度 / 批量快筛 / 管理自选池）
+├── main.py            # 交互菜单 + 非交互 CLI analyze 分发（统一快筛入口）
 ├── etf_resolver.py    # 输入解析，三级降级（正则→模糊匹配→LLM提取）
 ├── etf_data.py        # 数据获取（三源降级+缓存）+ 全部指标计算
 ├── etf_analyzer.py    # LLM 调用（研报 + 追问 + 批量 lite 三套 Prompt）+ 研报格式化

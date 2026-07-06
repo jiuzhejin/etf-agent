@@ -8,6 +8,10 @@ ETF 投资研报 Agent
   退出
 """
 
+import io
+import json
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 try:
@@ -38,6 +42,149 @@ def _name_lookup(code: str) -> str:
     """code → name（用于自选池补名/刷新），查不到返回空串。"""
     info = validate_code(code)
     return info["name"] if info else ""
+
+
+def _print_cli_usage() -> None:
+    print("用法:")
+    print("  ./start.sh                 # 交互式菜单")
+    print("  ./start.sh analyze 512880  # 单标的快筛")
+    print("  ./start.sh analyze 512880 510300 513180  # 多标的快筛")
+    print("  ./start.sh analyze 512880,510300,513180  # 多标的快筛")
+    print("  ./start.sh analyze 512880 --json  # 单标的 JSON")
+    print("  ./start.sh analyze 512880,510300 --json  # 多标的 JSON")
+
+
+def _json_dump(data: dict | list) -> None:
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _parse_cli_flags(args: list[str]) -> tuple[list[str], dict]:
+    """解析 CLI 选项；当前仅支持 --json。"""
+    flags = {"json": False}
+    rest = []
+    for arg in args:
+        if arg == "--json":
+            flags["json"] = True
+        else:
+            rest.append(arg)
+    return rest, flags
+
+
+def _resolve_cli_item(token: str) -> dict | None:
+    """命令行模式下解析单个输入；优先本地解析，避免不必要的 LLM 调用。"""
+    token = token.strip()
+    if not token:
+        return None
+    info = resolve_etf_code(token, allow_llm=False)
+    if info:
+        return info
+    return resolve_etf_code(token)
+
+
+def _resolve_cli_item_quiet(token: str) -> dict | None:
+    """JSON 模式下静默解析，避免解析过程污染 stdout。"""
+    with redirect_stdout(io.StringIO()):
+        return _resolve_cli_item(token)
+
+
+def _run_cli_batch(tokens: list[str], as_json: bool = False) -> int:
+    """非交互批量快筛：复用现有批量分析逻辑。"""
+    if not tokens:
+        if as_json:
+            _json_dump({"ok": False, "error": "analyze 需要至少一个 ETF 代码或名称"})
+        else:
+            print("analyze 需要至少一个 ETF 代码或名称")
+            _print_cli_usage()
+        return 2
+
+    items = []
+    seen = set()
+    invalid = []
+    for token in tokens:
+        result = _resolve_cli_item_quiet(token) if as_json else _resolve_cli_item(token)
+        if not result:
+            invalid.append(token)
+            continue
+        code = result["code"]
+        if code in seen:
+            continue
+        items.append({"code": code, "name": result["name"]})
+        seen.add(code)
+
+    if not items:
+        if as_json:
+            _json_dump({"ok": False, "error": "没有可分析的 ETF", "invalid_inputs": invalid})
+        else:
+            for token in invalid:
+                print(f"跳过：无法识别 {token}")
+            print("没有可分析的 ETF")
+        return 2
+
+    if as_json:
+        with redirect_stdout(io.StringIO()):
+            results, stats = batch.run_batch(items)
+        _json_dump(
+            {
+                "ok": True,
+                "mode": "batch",
+                "items": items,
+                "invalid_inputs": invalid,
+                "results": results,
+                "stats": stats,
+            }
+        )
+    else:
+        for token in invalid:
+            print(f"跳过：无法识别 {token}")
+        print(f"开始快筛 {len(items)} 只（串行，防频控）...")
+        results, stats = batch.run_batch(items)
+        batch.render(results, stats, "批量快筛 · CLI")
+    return 0
+
+
+def _split_cli_symbols(tokens: list[str]) -> list[str]:
+    """支持空格分隔和逗号分隔的 ETF 输入。"""
+    symbols = []
+    for token in tokens:
+        parts = token.replace("，", ",").split(",")
+        for part in parts:
+            symbol = part.strip()
+            if symbol:
+                symbols.append(symbol)
+    return symbols
+
+
+def _dispatch_cli(argv: list[str]) -> int | None:
+    """命令行子命令分发；返回 None 表示走原交互模式。"""
+    if not argv:
+        return None
+
+    args, flags = _parse_cli_flags(argv)
+    if not args:
+        _print_cli_usage()
+        return 0
+
+    cmd, *rest = args
+    if cmd in ("-h", "--help", "help"):
+        _print_cli_usage()
+        return 0
+    if cmd == "analyze":
+        symbols = _split_cli_symbols(rest)
+        if not symbols:
+            if flags["json"]:
+                _json_dump({"ok": False, "error": "analyze 需要至少一个 ETF 代码或名称"})
+            else:
+                print("analyze 需要至少一个 ETF 代码或名称")
+                _print_cli_usage()
+            return 2
+        return _run_cli_batch(symbols, as_json=flags["json"])
+
+    if flags["json"]:
+        _json_dump({"ok": False, "error": f"未知命令: {cmd}"})
+    else:
+        print(f"未知命令: {cmd}")
+        _print_cli_usage()
+    return 2
 
 
 # ============================================================
@@ -527,6 +674,10 @@ def manage_mode():
 
 
 def main():
+    cli_exit = _dispatch_cli(sys.argv[1:])
+    if cli_exit is not None:
+        return cli_exit
+
     print("=" * 50)
     print("  ETF 投资研报 Agent")
     print("=" * 50)
@@ -555,4 +706,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main() or 0)
